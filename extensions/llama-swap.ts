@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { RE2JS } from "re2js";
 
 interface LlamaSwapModel {
   id: string;
@@ -26,7 +27,6 @@ export const DEFAULT_EXCLUDE = /image|diffusion|sdxl|flux|krea|lowvram|tts|embed
 const DEFAULT_CONTEXT_WINDOW = 128000;
 const DEFAULT_MAX_TOKENS = 32768;
 const DEFAULT_API_KEY = "llama-swap-local";
-// pi-lens-ignore: hardcoded-url -- this is the documented local-server default.
 const DEFAULT_URL = "http://localhost:8080";
 
 type JsonPrimitive = string | number | boolean | null;
@@ -66,10 +66,14 @@ export function reasoningFromId(id: string): boolean {
   return REASONING_FAMILY.test(id);
 }
 
+export interface ExcludeMatcher {
+  test(value: string): boolean;
+}
+
 export interface ModelDefaults {
   contextWindow: number;
   maxTokens: number;
-  exclude: RegExp;
+  exclude: ExcludeMatcher;
 }
 
 function parseContextWindow(value: number | undefined, fallback: number): number {
@@ -189,10 +193,9 @@ function parseConfiguredString(value: string | undefined, fallback: string): str
   return value?.trim() ? value : fallback;
 }
 
-function parseExcludePattern(value: string): RegExp {
+function parseExcludePattern(value: string): ExcludeMatcher {
   try {
-    // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-    return new RegExp(value, "i");
+    return RE2JS.compile(value, RE2JS.CASE_INSENSITIVE);
   } catch {
     return DEFAULT_EXCLUDE;
   }
@@ -213,7 +216,7 @@ export function resolveConfig(
     parsePositiveNumber(env.LLAMA_SWAP_MAX_TOKENS) ??
     parsePositiveNumber(settings.maxTokens) ??
     DEFAULT_MAX_TOKENS;
-  let exclude = DEFAULT_EXCLUDE;
+  let exclude: ExcludeMatcher = DEFAULT_EXCLUDE;
   if (env.LLAMA_SWAP_EXCLUDE) exclude = parseExcludePattern(env.LLAMA_SWAP_EXCLUDE);
   else if (settings.exclude) exclude = parseExcludePattern(settings.exclude);
   return { url, providerId, apiKey, defaults: { contextWindow, maxTokens, exclude } };

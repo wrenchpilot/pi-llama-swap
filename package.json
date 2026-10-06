@@ -43,5 +43,8 @@
     "extensions": [
       "./extensions"
     ]
+  },
+  "dependencies": {
+    "re2js": "^2.8.6"
   }
 }

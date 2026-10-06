@@ -86,7 +86,7 @@ variable that overrides it.
 | `apiKey` | `LLAMA_SWAP_API_KEY` | `llama-swap-local` | bearer key sent to `/v1/models` and chat requests |
 | `contextWindow` | `LLAMA_SWAP_CONTEXT_WINDOW` | `128000` | fallback context window for unloaded models |
 | `maxTokens` | `LLAMA_SWAP_MAX_TOKENS` | `32768` | default max output tokens per model |
-| `exclude` | `LLAMA_SWAP_EXCLUDE` | built-in regex (see below) | regex of model IDs to hide |
+| `exclude` | `LLAMA_SWAP_EXCLUDE` | built-in regex (see below) | RE2-compatible regex of model IDs to hide |
 
 For CI or a shell-managed setup:
 
@@ -195,7 +195,8 @@ and/or set `modelOverrides` in `models.json`.
 **A model I want isn't listed.**
 
 It matched the exclude regex. Set a custom `exclude` in settings.json or
-`LLAMA_SWAP_EXCLUDE`. If the custom regex is invalid, the extension safely
+`LLAMA_SWAP_EXCLUDE`. Patterns use the safe, linear-time RE2 syntax; if a
+custom pattern is invalid or uses unsupported syntax, the extension safely
 falls back to its built-in exclude list.
 
 ## Development
