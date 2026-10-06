@@ -80,7 +80,7 @@ All settings are optional. Put them under the `"llama-swap"` key in
 variable that overrides it.
 
 | settings.json key | Environment variable | Default | Purpose |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `url` | `LLAMA_SWAP_URL` | `http://localhost:8080` | llama-swap base URL (a trailing `/v1` is also accepted) |
 | `provider` | `LLAMA_SWAP_PROVIDER` | `llama-swap` | provider ID registered in pi |
 | `apiKey` | `LLAMA_SWAP_API_KEY` | `llama-swap-local` | bearer key sent to `/v1/models` and chat requests |
