@@ -210,27 +210,6 @@ npm run typecheck
 The package declares `@earendil-works/pi-coding-agent` as a peer dependency;
 Pi supplies it when the extension is installed.
 
-## Publishing
-
-This package is scoped for the `wrenchpilot` npm account. Before publishing,
-make sure npm is authenticated as that account:
-
-```sh
-npm login
-npm whoami
-```
-
-Then run the checks and inspect the exact tarball contents:
-
-```sh
-npm run check
-npm pack --dry-run
-npm publish --access public
-```
-
-The `prepublishOnly` hook runs the test suite and TypeScript check again during
-`npm publish`. Never commit API keys or other secrets to this repository.
-
 ## License
 
 [MIT](LICENSE)
