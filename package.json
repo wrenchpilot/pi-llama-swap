@@ -1,6 +1,6 @@
 {
   "name": "@wrenchpilot/pi-llama-swap",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Pi extension that discovers llama-swap models and registers them as a provider, with authenticated model discovery.",
   "type": "module",
   "license": "MIT",
