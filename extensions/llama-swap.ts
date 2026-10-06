@@ -19,6 +19,9 @@ interface ModelEntry {
   cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
 }
 
+const REASONING_FAMILY = /qwen3|gemma[-_]?4|gpt[-_]?oss|deepseek.*flash/i;
+const DISCOVERY_TIMEOUT_MS = 10_000;
+
 export const DEFAULT_EXCLUDE = /image|diffusion|sdxl|flux|krea|lowvram|tts|embedding|embed|whisper|asr|bge|nomic|mxbai|e5|clip/i;
 const DEFAULT_CONTEXT_WINDOW = 128000;
 const DEFAULT_MAX_TOKENS = 32768;
@@ -46,12 +49,13 @@ function isLlamaSwapModel(value: JsonValue): value is LlamaSwapModel & JsonObjec
 
 export function rootUrl(value: string): string {
   const trimmed = value.replace(/\/+$/, "");
-  // Strip /v1 only when it's the root path; preserve /api/v1 style URLs.
-  return trimmed.replace(/^([a-z][a-z0-9+\-.]*:\/\/[^/]+)\/v1$/i, "$1");
+  // Accept either a host root or a URL already ending in /v1, including
+  // deployments mounted below a path such as /api/v1.
+  return trimmed.replace(/\/v1$/i, "");
 }
 
-// Reasoning defaults to on for modern reasoning-capable families (Qwen3.6+,
-// Gemma4, GPT-OSS, Deepseek-flash). Opt-out for explicit signals:
+// Reasoning is enabled for known reasoning-capable families. Opt out for
+// explicit signals:
 //   - "-no-thinking" / "nothinking" in the id
 //   - "-uncensored" derivatives (an uncensored variant of an otherwise
 //     reasoning-capable model never has reasoning on)
@@ -59,7 +63,7 @@ export function rootUrl(value: string): string {
 export function reasoningFromId(id: string): boolean {
   if (/(?:^|[-_])no[-_]?thinking(?:[-_]|$)/i.test(id)) return false;
   if (/[-_]uncensored$/i.test(id)) return false;
-  return true;
+  return REASONING_FAMILY.test(id);
 }
 
 export interface ModelDefaults {
@@ -73,7 +77,9 @@ function parseContextWindow(value: number | undefined, fallback: number): number
 }
 
 export function modelFrom(m: LlamaSwapModel, defaults: ModelDefaults): ModelEntry {
-  const modalities = m.architecture?.input_modalities ?? ["text"];
+  const modalities = Array.isArray(m.architecture?.input_modalities)
+    ? m.architecture.input_modalities
+    : ["text"];
   const input: ["text"] | ["text", "image"] = modalities.includes("image")
     ? ["text", "image"]
     : ["text"];
@@ -84,7 +90,7 @@ export function modelFrom(m: LlamaSwapModel, defaults: ModelDefaults): ModelEntr
     reasoning: reasoningFromId(m.id),
     input,
     contextWindow,
-    maxTokens: defaults.maxTokens,
+    maxTokens: Math.min(defaults.maxTokens, contextWindow),
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   };
 }
@@ -102,7 +108,10 @@ export async function discover(
   signal?: AbortSignal,
   apiKey?: string,
 ): Promise<ModelEntry[]> {
-  const request: RequestInit = { signal };
+  const timeout = AbortSignal.timeout(DISCOVERY_TIMEOUT_MS);
+  const request: RequestInit = {
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+  };
   if (apiKey?.trim()) request.headers = { Authorization: `Bearer ${apiKey}` };
   const response = await fetch(`${url}/models`, request);
   if (!response.ok) {
@@ -181,8 +190,12 @@ function parseConfiguredString(value: string | undefined, fallback: string): str
 }
 
 function parseExcludePattern(value: string): RegExp {
-  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-  return new RegExp(value, "i");
+  try {
+    // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
+    return new RegExp(value, "i");
+  } catch {
+    return DEFAULT_EXCLUDE;
+  }
 }
 
 export function resolveConfig(
@@ -240,16 +253,10 @@ export default async function (pi: ExtensionAPI) {
       api: "openai-completions",
       models,
       async refreshModels({ signal }: { signal?: AbortSignal }) {
-        const fresh = await discover(baseUrl, defaults, signal, apiKey);
-        // Preserve the user's existing `reasoning` and `name` overrides per id,
-        // so manual edits to the catalog aren't clobbered on refresh.
-        const prior = new Map(models.map((m) => [m.id, m] as const));
-        models = fresh.map((m) => {
-          const old = prior.get(m.id);
-          return old
-            ? { ...m, reasoning: old.reasoning, name: old.name }
-            : m;
-        });
+        // Pi reapplies models.json modelOverrides above this provider after a
+        // refresh, so return fresh server metadata instead of retaining stale
+        // names or reasoning flags from the previous catalog.
+        models = await discover(baseUrl, defaults, signal, apiKey);
         return models;
       },
     });

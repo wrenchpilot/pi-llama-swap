@@ -3,10 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import extension, {
+  DEFAULT_EXCLUDE,
   discover,
   modelFrom,
   readSettingsFile,
+  reasoningFromId,
   resolveConfig,
+  rootUrl,
   type ModelDefaults,
 } from "../extensions/llama-swap.ts";
 
@@ -107,6 +110,12 @@ describe("configuration", () => {
     expect(config.defaults.maxTokens).toBe(4096);
   });
 
+  test("falls back safely for an invalid custom exclude regex", () => {
+    const config = resolveConfig({ LLAMA_SWAP_EXCLUDE: "[" });
+
+    expect(config.defaults.exclude).toBe(DEFAULT_EXCLUDE);
+  });
+
   test("reads only validated llama-swap settings", () => {
     const directory = mkdtempSync(join(tmpdir(), "pi-llama-swap-"));
     const settingsPath = join(directory, "settings.json");
@@ -144,11 +153,13 @@ test("registers the authenticated discovered provider", async () => {
     apiKey: process.env.LLAMA_SWAP_API_KEY,
   };
   let authorization: string | null = null;
+  let discoveryCount = 0;
   const server = Bun.serve({
     port: 0,
     fetch(request) {
       authorization = request.headers.get("authorization");
-      return Response.json({ data: [{ id: "model" }] });
+      discoveryCount += 1;
+      return Response.json({ data: [{ id: "model", name: `model-${discoveryCount}` }] });
     },
   });
   servers.push(server);
@@ -182,18 +193,32 @@ test("registers the authenticated discovered provider", async () => {
     | undefined;
   expect(refreshModels).toBeDefined();
   if (refreshModels) {
-    await refreshModels({});
+    const refreshed = await refreshModels({});
     expect(authorization ?? "").toBe("Bearer configured-key");
+    expect(refreshed).toEqual([
+      expect.objectContaining({ id: "model", name: "model-2" }),
+    ]);
   }
 });
 
-test("keeps model metadata defaults intact", () => {
-  expect(modelFrom({ id: "qwen3-no-thinking" }, defaults)).toEqual(
+test("normalizes root and versioned endpoint URLs", () => {
+  expect(rootUrl("http://localhost:8080/")).toBe("http://localhost:8080");
+  expect(rootUrl("http://localhost:8080/v1")).toBe("http://localhost:8080");
+  expect(rootUrl("http://localhost:8080/api/v1")).toBe("http://localhost:8080/api");
+});
+
+test("classifies reasoning families and keeps output within context", () => {
+  expect(reasoningFromId("llama-3.1-8b")).toBe(false);
+  expect(reasoningFromId("qwen3-coder")).toBe(true);
+  expect(reasoningFromId("gemma-4-e4b")).toBe(true);
+  expect(reasoningFromId("gpt-oss-20b")).toBe(true);
+  expect(reasoningFromId("qwen3-no-thinking")).toBe(false);
+
+  expect(modelFrom({ id: "llama-3.1-8b", context_length: 4096 }, defaults)).toEqual(
     expect.objectContaining({
-      id: "qwen3-no-thinking",
       reasoning: false,
-      contextWindow: 128000,
-      maxTokens: 32768,
+      contextWindow: 4096,
+      maxTokens: 4096,
     }),
   );
 });

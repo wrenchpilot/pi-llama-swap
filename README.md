@@ -81,7 +81,7 @@ variable that overrides it.
 
 | settings.json key | Environment variable | Default | Purpose |
 |---|---|---|---|
-| `url` | `LLAMA_SWAP_URL` | `http://localhost:8080` | llama-swap base URL (no trailing `/v1`) |
+| `url` | `LLAMA_SWAP_URL` | `http://localhost:8080` | llama-swap base URL (a trailing `/v1` is also accepted) |
 | `provider` | `LLAMA_SWAP_PROVIDER` | `llama-swap` | provider ID registered in pi |
 | `apiKey` | `LLAMA_SWAP_API_KEY` | `llama-swap-local` | bearer key sent to `/v1/models` and chat requests |
 | `contextWindow` | `LLAMA_SWAP_CONTEXT_WINDOW` | `128000` | fallback context window for unloaded models |
@@ -143,14 +143,17 @@ Overrides set here are preserved across catalog refreshes.
 
 ## How models are classified
 
-- **Reasoning: on by default.** IDs matching `-no-thinking`, `nothinking`, or
-  `-uncensored` get reasoning off. llama-swap doesn't report reasoning
-  capability over `/v1/models`, so the extension uses this heuristic; override
-  any model in `models.json` with `"reasoning": true/false`.
+- **Reasoning:** enabled for recognized reasoning families (`qwen3`,
+  `gemma4`, `gpt-oss`, and `deepseek...flash`). IDs matching
+  `-no-thinking`, `nothinking`, or `-uncensored` get reasoning off.
+  llama-swap doesn't report reasoning capability over `/v1/models`, so the
+  extension uses this heuristic; override any model in `models.json` with
+  `"reasoning": true/false`.
 - **Vision:** set to `["text", "image"]` when `/v1/models` reports `image` in
   `architecture.input_modalities`.
 - **Context window:** taken from `context_length` when the model reports it;
-  otherwise the `contextWindow` default applies.
+  otherwise the `contextWindow` default applies. The default output limit is
+  capped to the discovered context window.
 - **Non-chat models are hidden** by the default exclude regex: image and
   diffusion models, TTS, whisper/asr, and common embedding families
   (`bge`, `nomic`, `mxbai`, `e5`, `clip`). Set your own `exclude` to change it.
@@ -180,7 +183,8 @@ mymodel:
     http://your-host:8080/v1/models
   ```
 
-- Open `/model` in pi to refresh.
+- Open `/model` in pi to refresh. Discovery requests time out after ten
+  seconds so a stalled server does not block Pi startup indefinitely.
 
 **A model shows the wrong context window or thinking behavior.**
 
@@ -191,7 +195,8 @@ and/or set `modelOverrides` in `models.json`.
 **A model I want isn't listed.**
 
 It matched the exclude regex. Set a custom `exclude` in settings.json or
-`LLAMA_SWAP_EXCLUDE`.
+`LLAMA_SWAP_EXCLUDE`. If the custom regex is invalid, the extension safely
+falls back to its built-in exclude list.
 
 ## Development
 
