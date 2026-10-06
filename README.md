@@ -45,7 +45,7 @@ explicitly enables Pi's provider authentication header.
    To try a pinned version:
 
    ```sh
-   pi install npm:@wrenchpilot/pi-llama-swap@0.1.2
+   pi install npm:@wrenchpilot/pi-llama-swap@0.1.3
    ```
 
 2. Configure llama-swap. For an unauthenticated local server, the default
