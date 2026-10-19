@@ -1,6 +1,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  getAgentDir,
+  readStoredCredential,
+  type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 import { RE2JS } from "re2js";
 
 interface LlamaSwapModel {
@@ -159,12 +163,8 @@ function parseSettingsSection(section: JsonObject): LlamaSwapSettings {
 }
 
 /**
- * Per-machine settings come from the optional top-level "llama-swap" key in
- * the pi agent directory's settings.json (e.g. ~/.pi/agent/settings.json;
- * this file is intentionally not synced between machines). The agent dir is
- * resolved with pi's own getAgentDir(), so PI_CODING_AGENT_DIR is honored —
- * sandboxes like pi-less-yolo mount the agent dir at /pi-agent with HOME
- * pointing elsewhere.
+ * @deprecated Retained for callers of the old helper. Runtime configuration
+ * is loaded from providers.<id> in the agent directory's models.json.
  */
 export function readSettingsFile(
   path: string = join(getAgentDir(), "settings.json"),
@@ -178,6 +178,38 @@ export function readSettingsFile(
   } catch {
     return {};
   }
+}
+
+/** Read llama-swap's endpoint and discovery defaults from Pi's models.json. */
+export function readModelSettingsFile(
+  providerId = "llama-swap",
+  path: string = join(getAgentDir(), "models.json"),
+): LlamaSwapSettings {
+  try {
+    const raw = JSON.parse(readFileSync(path, "utf8")) as JsonValue;
+    if (!isJsonObject(raw) || !isJsonObject(raw.providers)) return {};
+
+    const provider = raw.providers[providerId];
+    if (!isJsonObject(provider)) return {};
+    return {
+      url: parseOptionalString(provider.baseUrl),
+      contextWindow: parseOptionalNumber(provider.contextWindow),
+      maxTokens: parseOptionalNumber(provider.maxTokens),
+      exclude: parseOptionalString(provider.exclude),
+    };
+  } catch {
+    return {};
+  }
+}
+
+/** Read a Pi-stored API key without interpreting environment or models.json values. */
+export function readApiKeyFromAuthFile(
+  providerId: string,
+  path: string = join(getAgentDir(), "auth.json"),
+): string | undefined {
+  const credential = readStoredCredential(providerId, path);
+  if (credential?.type !== "api_key" || !credential.key.trim()) return undefined;
+  return credential.key;
 }
 
 function parsePositiveNumber(value: string | number | undefined): number | undefined {
@@ -204,10 +236,15 @@ function parseExcludePattern(value: string): ExcludeMatcher {
 export function resolveConfig(
   env: NodeJS.ProcessEnv,
   settings: LlamaSwapSettings = {},
+  storedApiKey?: string,
 ) {
   const url = rootUrl(parseConfiguredString(env.LLAMA_SWAP_URL ?? settings.url, DEFAULT_URL));
   const providerId = parseConfiguredString(env.LLAMA_SWAP_PROVIDER ?? settings.provider, "llama-swap");
-  const apiKey = env.LLAMA_SWAP_API_KEY ?? settings.apiKey ?? DEFAULT_API_KEY;
+  // Pi's auth.json credential is the source of truth when present. The env
+  // variable remains useful for temporary setups without a stored credential.
+  const apiKey =
+    storedApiKey ??
+    parseConfiguredString(env.LLAMA_SWAP_API_KEY, settings.apiKey ?? DEFAULT_API_KEY);
   const contextWindow =
     parsePositiveNumber(env.LLAMA_SWAP_CONTEXT_WINDOW) ??
     parsePositiveNumber(settings.contextWindow) ??
@@ -224,13 +261,22 @@ export function resolveConfig(
 
 export function readConfig(
   env: NodeJS.ProcessEnv = process.env,
-  settings: LlamaSwapSettings = readSettingsFile(),
+  settings?: LlamaSwapSettings,
 ) {
-  return resolveConfig(env, settings);
+  const providerId = parseConfiguredString(
+    env.LLAMA_SWAP_PROVIDER ?? settings?.provider,
+    "llama-swap",
+  );
+  return resolveConfig(
+    env,
+    settings ?? readModelSettingsFile(providerId),
+    readApiKeyFromAuthFile(providerId),
+  );
 }
 
 export default async function (pi: ExtensionAPI) {
-  const { url, providerId, apiKey, defaults } = readConfig();
+  const config = readConfig();
+  const { url, providerId, apiKey, defaults } = config;
   const baseUrl = `${url}/v1`;
 
   let models: ModelEntry[] = [];
@@ -249,17 +295,26 @@ export default async function (pi: ExtensionAPI) {
     pi.registerProvider(providerId, {
       name: "llama-swap",
       baseUrl,
-      apiKey,
+      // Pi's stored credential takes precedence at request time. This value
+      // remains a fallback for env-only setups and unauthenticated local servers.
+      apiKey: parseConfiguredString(process.env.LLAMA_SWAP_API_KEY, DEFAULT_API_KEY),
       // Keep authentication explicit for Pi versions/providers that do not
       // infer Authorization from the OpenAI client API key alone.
       authHeader: true,
       api: "openai-completions",
       models,
       async refreshModels({ signal }: { signal?: AbortSignal }) {
+        const refreshedConfig = readConfig();
+        const refreshedBaseUrl = `${refreshedConfig.url}/v1`;
         // Pi reapplies models.json modelOverrides above this provider after a
         // refresh, so return fresh server metadata instead of retaining stale
         // names or reasoning flags from the previous catalog.
-        models = await discover(baseUrl, defaults, signal, apiKey);
+        models = await discover(
+          refreshedBaseUrl,
+          refreshedConfig.defaults,
+          signal,
+          refreshedConfig.apiKey,
+        );
         return models;
       },
     });

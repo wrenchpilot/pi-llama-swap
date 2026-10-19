@@ -30,9 +30,8 @@ explicitly enables Pi's provider authentication header.
   detected from llama-swap's capability reporting.
 - **Your tweaks survive refreshes.** Per-model overrides in `models.json` are
   re-applied every time the catalog refreshes.
-- **Config lives in pi, not your shell.** One optional key in the pi agent
-  directory's `settings.json` per machine; environment variables override it
-  when you need that.
+- **Config lives in Pi's model files.** Endpoint and discovery defaults are
+  read from `models.json`; credentials come from Pi's `auth.json`.
 
 ## Quick start
 
@@ -48,21 +47,37 @@ explicitly enables Pi's provider authentication header.
    pi install npm:@wrenchpilot/pi-llama-swap@0.1.3
    ```
 
-2. Configure llama-swap. For an unauthenticated local server, the default
-   placeholder key is harmless. For a server configured with `apiKeys`, set the
-   actual key under the `llama-swap` section:
+2. Configure the endpoint and model defaults in
+   `~/.pi/agent/models.json`:
 
    ```json
    {
-     "llama-swap": {
-       "url": "http://llama-swap.example.com",
-       "apiKey": "sk-your-llama-swap-key"
+     "providers": {
+       "llama-swap": {
+         "baseUrl": "http://llama-swap.example.com/v1",
+         "api": "openai-completions",
+         "contextWindow": 128000,
+         "maxTokens": 32768
+       }
      }
    }
    ```
 
-   This is `~/.pi/agent/settings.json` by default, or
-   `$PI_CODING_AGENT_DIR/settings.json` when that variable is set.
+   For a protected server, store its key in `~/.pi/agent/auth.json`:
+
+   ```json
+   {
+     "llama-swap": {
+       "type": "api_key",
+       "key": "sk-your-llama-swap-key"
+     }
+   }
+   ```
+
+   Pi uses `~/.pi/agent` by default, or `$PI_CODING_AGENT_DIR` when that
+   variable is set. You can also add or update the credential with Pi's
+   `/login` command. For an unauthenticated local server, the extension uses
+   the harmless placeholder key `llama-swap-local`.
 
 3. Restart pi, then verify:
 
@@ -75,18 +90,23 @@ explicitly enables Pi's provider authentication header.
 
 ## Configuration
 
-All settings are optional. Put them under the `"llama-swap"` key in
-`settings.json` in pi's agent directory. Each key has a matching environment
-variable that overrides it.
+Put model and endpoint settings under `providers.llama-swap` in Pi's
+`models.json`. The extension reads `baseUrl` and its discovery defaults from
+that provider entry. `modelOverrides` remains Pi's native way to customize
+individual discovered models. The provider-level `contextWindow`, `maxTokens`,
+and `exclude` keys are read by this extension as defaults for discovered models.
 
-| settings.json key | Environment variable | Default | Purpose |
+| `models.json` provider key | Environment variable | Default | Purpose |
 | --- | --- | --- | --- |
-| `url` | `LLAMA_SWAP_URL` | `http://localhost:8080` | llama-swap base URL (a trailing `/v1` is also accepted) |
-| `provider` | `LLAMA_SWAP_PROVIDER` | `llama-swap` | provider ID registered in pi |
-| `apiKey` | `LLAMA_SWAP_API_KEY` | `llama-swap-local` | bearer key sent to `/v1/models` and chat requests |
+| `baseUrl` | `LLAMA_SWAP_URL` | `http://localhost:8080/v1` | llama-swap endpoint; host roots and URLs ending in `/v1` are accepted |
+| provider entry name | `LLAMA_SWAP_PROVIDER` | `llama-swap` | provider ID registered in Pi |
 | `contextWindow` | `LLAMA_SWAP_CONTEXT_WINDOW` | `128000` | fallback context window for unloaded models |
 | `maxTokens` | `LLAMA_SWAP_MAX_TOKENS` | `32768` | default max output tokens per model |
 | `exclude` | `LLAMA_SWAP_EXCLUDE` | built-in regex (see below) | RE2-compatible regex of model IDs to hide |
+
+Store the API key in Pi's `auth.json` under the provider ID, or use Pi's
+`/login` command. `LLAMA_SWAP_API_KEY` is available when no stored credential
+is present; the default placeholder is used if neither is configured.
 
 For CI or a shell-managed setup:
 
@@ -95,21 +115,22 @@ export LLAMA_SWAP_URL=http://localhost:8080
 export LLAMA_SWAP_API_KEY=sk-your-llama-swap-key
 ```
 
-The environment variables take precedence over `settings.json`.
+Environment variables override the corresponding model defaults when Pi loads
+the extension. A credential saved in `auth.json` takes precedence over
+`LLAMA_SWAP_API_KEY`, matching Pi's credential resolution order.
 
 ### Authentication details
 
 llama-swap accepts bearer authentication for protected endpoints. The
-extension sends:
+extension reads the provider credential from Pi's `auth.json` and sends:
 
 ```http
 Authorization: Bearer sk-your-llama-swap-key
 ```
 
-for model discovery. Pi's `openai-completions` implementation sends the same
+for model discovery. Pi's `openai-completions` implementation uses the stored
 credential for chat requests. The key is never written to logs by this
-extension. Use an environment variable or a secret-managed settings file
-instead of committing it to a project.
+extension. Keep `auth.json` private and out of version control.
 
 ### Per-model overrides
 
@@ -194,7 +215,8 @@ and/or set `modelOverrides` in `models.json`.
 
 **A model I want isn't listed.**
 
-It matched the exclude regex. Set a custom `exclude` in settings.json or
+It matched the exclude regex. Set a custom `exclude` in the `llama-swap`
+provider entry in `models.json` or
 `LLAMA_SWAP_EXCLUDE`. Patterns use the safe, linear-time RE2 syntax; if a
 custom pattern is invalid or uses unsupported syntax, the extension safely
 falls back to its built-in exclude list.
