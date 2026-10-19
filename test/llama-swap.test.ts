@@ -148,9 +148,11 @@ describe("configuration", () => {
 });
 
 test("registers the authenticated discovered provider", async () => {
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-llama-swap-agent-"));
   const previous = {
     url: process.env.LLAMA_SWAP_URL,
     apiKey: process.env.LLAMA_SWAP_API_KEY,
+    agentDir: process.env.PI_CODING_AGENT_DIR,
   };
   let authorization: string | null = null;
   let discoveryCount = 0;
@@ -164,40 +166,45 @@ test("registers the authenticated discovered provider", async () => {
   });
   servers.push(server);
 
-  process.env.LLAMA_SWAP_URL = server.url.href;
-  process.env.LLAMA_SWAP_API_KEY = "configured-key";
   let registration: Record<string, unknown> | undefined;
 
   try {
+    process.env.LLAMA_SWAP_URL = server.url.href;
+    process.env.LLAMA_SWAP_API_KEY = "configured-key";
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+
     await extension({
       registerProvider(_provider: string, config: Record<string, unknown>) {
         registration = config;
       },
     } as never);
+
+    expect(authorization ?? "").toBe("Bearer configured-key");
+    expect(registration?.apiKey).toBe("configured-key");
+    expect(registration?.authHeader).toBe(true);
+    expect(registration?.models).toEqual([
+      expect.objectContaining({ id: "model" }),
+    ]);
+
+    const refreshModels = registration?.refreshModels as
+      | ((context: { signal?: AbortSignal }) => Promise<unknown>)
+      | undefined;
+    expect(refreshModels).toBeDefined();
+    if (refreshModels) {
+      const refreshed = await refreshModels({});
+      expect(authorization ?? "").toBe("Bearer configured-key");
+      expect(refreshed).toEqual([
+        expect.objectContaining({ id: "model", name: "model-2" }),
+      ]);
+    }
   } finally {
     if (previous.url === undefined) delete process.env.LLAMA_SWAP_URL;
     else process.env.LLAMA_SWAP_URL = previous.url;
     if (previous.apiKey === undefined) delete process.env.LLAMA_SWAP_API_KEY;
     else process.env.LLAMA_SWAP_API_KEY = previous.apiKey;
-  }
-
-  expect(authorization ?? "").toBe("Bearer configured-key");
-  expect(registration?.apiKey).toBe("configured-key");
-  expect(registration?.authHeader).toBe(true);
-  expect(registration?.models).toEqual([
-    expect.objectContaining({ id: "model" }),
-  ]);
-
-  const refreshModels = registration?.refreshModels as
-    | ((context: { signal?: AbortSignal }) => Promise<unknown>)
-    | undefined;
-  expect(refreshModels).toBeDefined();
-  if (refreshModels) {
-    const refreshed = await refreshModels({});
-    expect(authorization ?? "").toBe("Bearer configured-key");
-    expect(refreshed).toEqual([
-      expect.objectContaining({ id: "model", name: "model-2" }),
-    ]);
+    if (previous.agentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous.agentDir;
+    rmSync(agentDir, { recursive: true, force: true });
   }
 });
 
