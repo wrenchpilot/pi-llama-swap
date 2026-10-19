@@ -208,8 +208,8 @@ export function readApiKeyFromAuthFile(
   path: string = join(getAgentDir(), "auth.json"),
 ): string | undefined {
   const credential = readStoredCredential(providerId, path);
-  if (credential?.type !== "api_key" || !credential.key.trim()) return undefined;
-  return credential.key;
+  if (credential?.type !== "api_key" || typeof credential.key !== "string") return undefined;
+  return credential.key.trim() ? credential.key : undefined;
 }
 
 function parsePositiveNumber(value: string | number | undefined): number | undefined {
